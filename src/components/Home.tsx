@@ -1,9 +1,10 @@
 import { useState } from "react"
-import { doc, setDoc } from "firebase/firestore"
+import { doc, setDoc, getDoc } from "firebase/firestore"
 import { firestore } from "../firebase"
 
 function Home() {
     const [roomCode, setRoomCode] = useState("")
+    const [joinRoomCode, setJoinRoomCode] = useState("")
 
     function generateRoomCode() {
         const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -15,16 +16,21 @@ function Home() {
         }
         return code
     }
-    // Firestore needs time to save room so wait till finish
+    // fetch needs to wait for the Hono response
     async function onCreateRoom() {
         const newRoomCode = generateRoomCode()
         setRoomCode(newRoomCode)
-        const roomRef = doc(firestore, "rooms", newRoomCode)
-
-        await setDoc(roomRef, {
-            creator : "temporary-user",
-            members: [],
-            votes: []
+        // where and how to send request
+        const response = await fetch("http://localhost:3000/api/rooms", {
+            method: "POST",
+            // tell Hono what format we're sending (JSON)
+            headers: {
+                "Content-Type": "application/json"
+            },
+            // put the data in the request body
+            body: JSON.stringify({
+                roomCode: newRoomCode
+            })
         })
     }
 
@@ -37,6 +43,12 @@ function Home() {
             <h1>Movie Night Matcher</h1>
             <button onClick={onCreateRoom}>Create a Room</button>
             <button onClick={onJoinRoom}>Join a Room</button>
+            <input 
+                value={joinRoomCode}
+                onChange={(event) => setJoinRoomCode(event.target.value)}
+                placeholder="Enter room code"
+            />
+
             {roomCode && 
                 <p>Your room code is: {roomCode}</p>
             }
