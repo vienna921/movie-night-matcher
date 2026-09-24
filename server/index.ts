@@ -2,9 +2,10 @@ import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { cors } from "hono/cors"
 import { db } from "./firebaseAdmin"
-import { getFirestore, FieldValue } from "firebase-admin/firestore"
+import { FieldValue } from "firebase-admin/firestore"
 
 const app = new Hono()
+// middleware
 app.use("*", cors({
     origin: "http://localhost:5173"
 }))
@@ -13,11 +14,6 @@ app.get("/", (c) => {
     return c.text("Movie Night Matcher API is running")
 })
 
-serve({
-    // when request arrives, give to Hono
-    fetch: app.fetch,
-    port: 3000
-})
 
 app.post("/api/rooms", async (c) => {
     // read request
@@ -61,3 +57,9 @@ app.post("/api/rooms/join", async (c) => {
     })
 })
 
+// start server
+serve({
+    // when request arrives, give to Hono
+    fetch: app.fetch,
+    port: 3000
+})

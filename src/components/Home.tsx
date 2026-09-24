@@ -34,8 +34,24 @@ function Home() {
         })
     }
 
-    function onJoinRoom() {
-        console.log("Join Room clicked")
+    async function onJoinRoom() {
+        const response = await fetch("http://localhost:3000/api/rooms/join", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                roomCode: joinRoomCode
+            })
+        })
+        const data = await response.json()
+
+        if(!response.ok) {
+            alert(data.error)
+            return
+        }
+
+        alert("Joined room!")
     }
     
     return(
