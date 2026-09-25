@@ -1,3 +1,4 @@
+import "dotenv/config"
 import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { cors } from "hono/cors"
@@ -90,6 +91,19 @@ app.post("/api/rooms/join", async (c) => {
     return c.json({
         message: "Room joined"
     })
+})
+
+app.get("/api/movies", async (c) => {
+    const response = await fetch(
+        "https://api.themoviedb.org/3/movie/popular",
+        {
+            headers: {
+                Authorization: `Bearer ${process.env.TMDB_API_KEY}`
+            }
+        }
+    )
+    const data = await response.json()
+    return c.json(data)
 })
 
 // start server
