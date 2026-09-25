@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { doc, setDoc, getDoc } from "firebase/firestore"
-import { firestore } from "../firebase"
+import { firestore, auth } from "../firebase"
 
 function Home() {
     const [roomCode, setRoomCode] = useState("")
@@ -20,25 +20,42 @@ function Home() {
     async function onCreateRoom() {
         const newRoomCode = generateRoomCode()
         setRoomCode(newRoomCode)
+        if (!auth.currentUser) {
+            alert("Not Logged in")
+            return
+        }
+        const user = auth.currentUser
+        const token = await user.getIdToken()
         // where and how to send request
         const response = await fetch("http://localhost:3000/api/rooms", {
             method: "POST",
             // tell Hono what format we're sending (JSON)
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
             },
             // put the data in the request body
             body: JSON.stringify({
                 roomCode: newRoomCode
             })
         })
+        console.log("Create room response:", response.status)
+
     }
 
     async function onJoinRoom() {
+        if (!auth.currentUser) {
+            alert("Not Logged in")
+            return
+        }
+        const user = auth.currentUser
+        const token = await user.getIdToken()
+        
         const response = await fetch("http://localhost:3000/api/rooms/join", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
             },
             body: JSON.stringify({
                 roomCode: joinRoomCode
