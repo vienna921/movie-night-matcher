@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { auth } from "../firebase"
+import { onAuthStateChanged } from "firebase/auth"
 
 type Movie = {
     id: number
@@ -10,10 +11,27 @@ type Movie = {
 }
 function Home() {
     const [roomCode, setRoomCode] = useState("")
+    useEffect(() => {
+        const savedRoomCode = localStorage.getItem("roomCode")
+        if (savedRoomCode) {
+            setRoomCode(savedRoomCode)
+        }
+    }, [])
+  
     const [joinRoomCode, setJoinRoomCode] = useState("")
     const [movies, setMovies] = useState<Movie[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState("")
+    const [votedMovies, setVotedMovies] = useState<number[]>([])
+    const [currentMovieIndex, setCurrentMovieIndex] = useState(0)
+    const [authReady, setAuthReady] = useState(false)
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            setAuthReady(true)
+        })
+        return unsubscribe
+    }, [])
 
     async function getMovies() {
         try {
@@ -45,10 +63,82 @@ function Home() {
         }
         return code
     }
+
+    async function getMyVotes() {
+        if (!roomCode) {
+            alert("Join or create a room first")
+            return
+        }
+        if (!auth.currentUser) {
+            console.log("Firebase user not ready yet")
+            return
+        }
+
+        const token = await auth.currentUser.getIdToken()
+
+        const response = await fetch(
+            `http://localhost:3000/api/rooms/${roomCode}/votes`,
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            }
+        )
+        console.log("GET MY VOTES STATUS:", response.status)
+        const data = await response.json()
+
+        console.log("GET MY VOTES RESPONSE:", data)
+
+        const movieIds = data.votes.map(
+            (vote: { movieId: number }) => vote.movieId
+        )
+        setVotedMovies(movieIds)
+    }
+
+    useEffect(() => {
+        console.log("ROOM CODE CHANGED:", roomCode)
+        if (roomCode && authReady) {
+            getMyVotes()
+        }
+    }, [roomCode, authReady])
+
+    async function submitVote(movieId: number, vote:"like" | "pass") {
+        console.log("ROOM CODE:", roomCode)
+        if (!auth.currentUser) {
+            alert("Not logged in")
+            return
+        }
+
+        const token = await auth.currentUser.getIdToken()
+
+        const response = await fetch(
+            `http://localhost:3000/api/rooms/${roomCode}/votes`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    movieId,
+                    vote
+                })
+            }
+        )
+
+        const data =  await response.json()
+
+        console.log(data)
+
+        setVotedMovies((previouse) => [...previouse, movieId])
+    }
     // fetch needs to wait for the Hono response
     async function onCreateRoom() {
         const newRoomCode = generateRoomCode()
         setRoomCode(newRoomCode)
+        // tells browser to rmb value under name roomCode
+        localStorage.setItem("roomCode", newRoomCode)
         if (!auth.currentUser) {
             alert("Not Logged in")
             return
@@ -97,14 +187,20 @@ function Home() {
             return
         }
 
+        setRoomCode(joinRoomCode)
+        localStorage.setItem("roomCode", joinRoomCode)
+
         alert("Joined room!")
     }
-    
+
+    const currentMovie = movies[currentMovieIndex]
+
     return(
         <div>
             <h1>Movie Night Matcher</h1>
             <button onClick={onCreateRoom}>Create a Room</button>
             <button onClick={onJoinRoom}>Join a Room</button>
+            <button onClick={getMyVotes}>Get My Votes</button>
             <input 
                 value={joinRoomCode}
                 onChange={(event) => setJoinRoomCode(event.target.value)}
@@ -114,7 +210,6 @@ function Home() {
             {roomCode && 
                 <p>Your room code is: {roomCode}</p>
             }
-
             {loading ? (
                 <p>Loading movies...</p>
             ) : error ? (
@@ -128,8 +223,10 @@ function Home() {
                         flexWrap: "wrap"
                     }}
                 >
-                    {movies.map((movie) => (
-                        <div key={movie.id}
+                    <p>Movie {currentMovieIndex + 1} of {movies.length}</p>
+
+                    {currentMovie && (
+                        <div key={currentMovie.id}
                             style={{
                                 width: "250px",
                                 margin: "20px",
@@ -137,19 +234,48 @@ function Home() {
                                 border: "1px solid #ccc"
                             }}
                         >
-                            <h2>{movie.title}</h2>
-                            <p>Rating: {movie.vote_average.toFixed(1)}/10</p>
+                            <h2>{currentMovie.title}</h2>
+                            <p>Rating: {currentMovie.vote_average.toFixed(1)}/10</p>
                             <img
-                                src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
-                                alt={movie.title}
+                                src={`https://image.tmdb.org/t/p/w500${currentMovie.poster_path}`}
+                                alt={currentMovie.title}
                                 style={{
                                     width: "100%"
                                 }}
                             />
-                            <p>{movie.overview}</p>
-                            
+                            <p>{currentMovie.overview}</p>
+                            <div>
+                                {votedMovies.includes(currentMovie.id) && (
+                                    <p>You voted on this movie.</p>
+                                )}
+
+                                <button 
+                                    onClick={() => submitVote(currentMovie.id, "like")}
+                                    disabled={votedMovies.includes(currentMovie.id)}
+                                >
+                                    Like
+                                </button>
+                                <button 
+                                    onClick={() => submitVote(currentMovie.id, "pass")}
+                                    disabled={votedMovies.includes(currentMovie.id)}
+                                >
+                                    Pass
+                                </button>
+                                <button 
+                                    onClick={() => setCurrentMovieIndex((previous) => previous - 1)}
+                                    disabled={currentMovieIndex === 0}
+                                >
+                                    Previous
+                                </button>
+                                <button 
+                                    onClick={() => setCurrentMovieIndex((previous) => previous + 1)}
+                                    disabled={currentMovieIndex === movies.length - 1}
+                                >
+                                    Next
+                                </button>
+                            </div>
                         </div>
-                    ))}
+                    )}
                 </div>
             )}
             
