@@ -8,7 +8,17 @@ type Movie = {
     poster_path: string | null
     vote_average: number
     overview: string
+    genre_ids: number[]
 }
+
+const genres = [
+    { id: 28, name: "Action" },
+    { id: 35, name: "Comedy" },
+    { id: 18, name: "Drama" },
+    { id: 27, name: "Horror" },
+    { id: 878, name: "Science Fiction" },
+    { id: 10749, name: "Romance" },
+]
 function Home() {
     const [roomCode, setRoomCode] = useState("")
     useEffect(() => {
@@ -25,6 +35,8 @@ function Home() {
     const [votedMovies, setVotedMovies] = useState<number[]>([])
     const [currentMovieIndex, setCurrentMovieIndex] = useState(0)
     const [authReady, setAuthReady] = useState(false)
+    const [searchTerm, setSearchTerm] = useState("")
+    const [selectedGenre, setSelectedGenre] = useState<number | null>(null)
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -193,7 +205,18 @@ function Home() {
         alert("Joined room!")
     }
 
-    const currentMovie = movies[currentMovieIndex]
+    const filteredMovies = movies.filter((movie) => {        
+        const matchesSearch = movie.title
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase())
+        const matchesGenre = 
+            selectedGenre === null || 
+            movie.genre_ids.includes(selectedGenre)
+        
+        return matchesSearch && matchesGenre
+    })
+    const currentMovie = filteredMovies[currentMovieIndex]
+
 
     return(
         <div>
@@ -223,9 +246,38 @@ function Home() {
                         flexWrap: "wrap"
                     }}
                 >
-                    <p>Movie {currentMovieIndex + 1} of {movies.length}</p>
+                    <input 
+                        value={searchTerm}
+                        onChange={(event) => {
+                            setSearchTerm(event.target.value)
+                            setCurrentMovieIndex(0)
+                        }}
+                        placeholder="Search movies"
+                    />
+                    <div>
+                        <button onClick={() => {
+                            setSelectedGenre(null)
+                            setCurrentMovieIndex(0)
+                        }}>
+                            All
+                        </button>
 
-                    {currentMovie && (
+                        {genres.map((genre) => (
+                            <button
+                                key={genre.id}
+                                onClick={() => {
+                                    setSelectedGenre(genre.id)
+                                    setCurrentMovieIndex(0)
+                                }}
+                            >
+                                {genre.name}
+                            </button>
+                        ))}
+                    </div>
+                    
+                    <p>Movie {currentMovieIndex + 1} of {filteredMovies.length}</p>
+
+                    {currentMovie ? (
                         <div key={currentMovie.id}
                             style={{
                                 width: "250px",
@@ -269,12 +321,14 @@ function Home() {
                                 </button>
                                 <button 
                                     onClick={() => setCurrentMovieIndex((previous) => previous + 1)}
-                                    disabled={currentMovieIndex === movies.length - 1}
+                                    disabled={currentMovieIndex === filteredMovies.length - 1}
                                 >
                                     Next
                                 </button>
                             </div>
                         </div>
+                    ) : (
+                        <p>No movies found.</p>
                     )}
                 </div>
             )}
