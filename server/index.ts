@@ -30,8 +30,9 @@ app.post("/api/rooms", async (c) => {
     }
     // is token issued by Firebase and untampered?
     let uid: string
+    let decodedToken
     try {
-        const decodedToken = await getAuth().verifyIdToken(token)
+        decodedToken = await getAuth().verifyIdToken(token)
         uid = decodedToken.uid
     } catch (error) {
         return c.json({ error: "Invalid token" }, 401)
@@ -47,11 +48,40 @@ app.post("/api/rooms", async (c) => {
     await roomDoc.set({
         roomCode: data.roomCode,
         creator: uid,
-        members: [uid]
+        votingRound: 1,
+        members: [
+            {
+                uid: uid,
+                email: decodedToken.email,
+                lastSeen: Date.now()
+            }
+        ],
+        roundMovieIds: []
     })
 
     return c.json({
         message: "Room received!"
+    })
+})
+
+app.post("/api/rooms/:roomCode/next-round", async (c) => {
+    const roomCode = c.req.param("roomCode")
+    const data = await c.req.json()
+    const roomRef = db.collection("rooms").doc(roomCode)
+    const roomDoc = await roomRef.get()
+    if (!roomDoc.exists) {
+        return c.json({ error: "Room not found" }, 404)
+    }
+
+    const roomData = roomDoc.data()
+    const currentRound = roomData?.votingRound ?? 1
+    await roomRef.update({
+        votingRound: currentRound + 1,
+        roundMovieIds: data.movieIds
+    })
+    return c.json({
+        message: "Voting round updated",
+        votingRound: currentRound + 1
     })
 })
 
@@ -76,18 +106,33 @@ app.post("/api/rooms/join", async (c) => {
         return c.json({ error: "Missing token" }, 401)
     }
     let uid: string
+    let decodedToken;
     // is token issued by Firebase and untampered?
     try {
-        const decodedToken = await getAuth().verifyIdToken(token)
+        decodedToken = await getAuth().verifyIdToken(token)
         uid = decodedToken.uid
     } catch (error) {
         return c.json({ error: "Invalid token" }, 401)
     }
 
     // wait for Firestore to finish update
-    await roomDoc.update({
-        members: FieldValue.arrayUnion(uid)
-    })
+    const roomData = snapshot.data()
+    const members = roomData?.members || []
+    const alreadyMember = members.some(
+        (member: { uid: string }) => member.uid === uid
+    )
+    if (!alreadyMember) {
+        await roomDoc.update({
+            members: [
+                ...members,
+                {
+                    uid: uid,
+                    email: decodedToken.email,
+                    lastSeen: Date.now()
+                }
+            ]
+        })
+    }
     return c.json({
         message: "Room joined"
     })
@@ -117,7 +162,7 @@ app.post("/api/rooms/:roomCode/votes", async (c) => {
         return c.json({ error: "Invalid token" }, 401)
     }
 
-    const voteId = `${uid}_${data.movieId}`
+    const voteId = `${uid}_${data.movieId}_round${data.round}`
 
     // pointer to Firestore document
     // db from firebaseAdmin.ts
@@ -131,7 +176,8 @@ app.post("/api/rooms/:roomCode/votes", async (c) => {
     await voteRef.set({
         userId: uid,
         movieId: data.movieId,
-        vote: data.vote
+        vote: data.vote,
+        round: data.round
     })
 
     return c.json({
@@ -191,6 +237,56 @@ app.get("/api/movies", async (c) => {
     return c.json(data)
 })
 console.log("SERVER STARTED WITH GET VOTES ROUTE")
+
+app.post("/api/rooms/:roomCode/heartbeat", async (c) => {
+    const roomCode = c.req.param("roomCode")
+
+    const authHeader = c.req.header("Authorization")
+
+    if (!authHeader) {
+        return c.json({ error: "Missing authorization header" }, 401)
+    }
+
+    const token = authHeader.split(" ")[1]
+
+    if (!token) {
+        return c.json({ error: "Missing token" }, 401)
+    }
+    
+    let uid: string
+
+    try {
+        const decodedToken = await getAuth().verifyIdToken(token)
+        uid = decodedToken.uid
+    } catch (error) {
+        return c.json({ error: "Invalid token" }, 401)
+    }
+
+    const roomRef = db.collection("rooms").doc(roomCode)
+    const roomSnapshot = await roomRef.get()
+
+    if (!roomSnapshot.exists) {
+        return c.json({ error: "Room not found" }, 404)
+    }
+
+    const roomData = roomSnapshot.data()
+
+    const updatedMembers = (roomData?.members || []).map(
+        (member: { uid: string; email: string; lastSeen: number }) => {
+            if (member.uid === uid) {
+                return {
+                    ...member,
+                    lastSeen: Date.now()
+                }
+            }
+            return member
+        }
+    )
+    await roomRef.update({
+        members: updatedMembers
+    })
+    return c.json({ message: "Heartbeat updated" })
+})
 // start server
 serve({
     // when request arrives, give to Hono

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
-import { auth } from "../firebase"
+import { auth, firestore } from "../firebase"
 import { onAuthStateChanged } from "firebase/auth"
+import { collection, doc, onSnapshot } from "firebase/firestore"
 
 type Movie = {
     id: number
@@ -37,6 +38,95 @@ function Home() {
     const [authReady, setAuthReady] = useState(false)
     const [searchTerm, setSearchTerm] = useState("")
     const [selectedGenre, setSelectedGenre] = useState<number | null>(null)
+    const [members, setMembers] = useState<{
+        uid: string; email: string; lastSeen: number }[]
+    >([])
+    const [liveVotes, setLiveVotes] = useState<
+        { 
+            userId: string
+            movieId: number
+            vote: "like" | "pass" 
+            round: number
+        }[]
+    >([])
+    const [votingRound, setVotingRound] = useState(1)
+    const [roundMovieIds, setRoundMovieIds] = useState<number[]>([])    
+    
+    useEffect(() => {
+        if (!roomCode || !authReady) {
+            return
+        }
+        const sendHeartbeat = async () => {
+            if (!auth.currentUser) {
+                return
+            }
+            const token = await auth.currentUser.getIdToken()
+            await fetch(
+                `http://localhost:3000/api/rooms/${roomCode}/heartbeat`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            )
+        }
+        sendHeartbeat()
+
+        const interval = setInterval(sendHeartbeat, 10000)
+        return () => clearInterval(interval)
+    }, [roomCode, authReady])
+    useEffect(() => {
+        if (!roomCode) {
+            return
+        }
+
+        const votesRef = collection(
+            firestore,
+            "rooms",
+            roomCode,
+            "votes"
+        )
+
+        const unsubscribe = onSnapshot(votesRef, (snapshot) => {
+            const votes = snapshot.docs.map((doc) => doc.data()) as {
+                userId: string
+                movieId: number
+                vote: "like" | "pass"
+                round: number
+            }[]
+            setLiveVotes(votes)
+
+        })
+        return unsubscribe
+    }, [roomCode])
+
+    useEffect(() => {
+        if (!roomCode) {
+            return
+        }
+
+        const roomRef = doc(firestore, "rooms", roomCode)
+        
+        // whenever this Firestore document changes,
+        const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data()
+                setMembers(data.members || [])
+                setRoundMovieIds(data.roundMovieIds || [])
+                setVotingRound((previousRound) => {
+                    const newRound = data.votingRound || 1
+
+                    if (newRound !== previousRound) {
+                        setCurrentMovieIndex(0)
+                        setVotedMovies([])
+                    }
+                    return newRound
+                })
+            }
+        })
+        return unsubscribe
+    }, [roomCode])
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -97,26 +187,21 @@ function Home() {
                 }
             }
         )
-        console.log("GET MY VOTES STATUS:", response.status)
         const data = await response.json()
 
-        console.log("GET MY VOTES RESPONSE:", data)
-
-        const movieIds = data.votes.map(
-            (vote: { movieId: number }) => vote.movieId
-        )
+        const movieIds = data.votes
+            .filter((vote: { round: number }) => vote.round === votingRound)
+            .map((vote: { movieId: number }) => vote.movieId)
         setVotedMovies(movieIds)
     }
 
     useEffect(() => {
-        console.log("ROOM CODE CHANGED:", roomCode)
         if (roomCode && authReady) {
             getMyVotes()
         }
     }, [roomCode, authReady])
 
     async function submitVote(movieId: number, vote:"like" | "pass") {
-        console.log("ROOM CODE:", roomCode)
         if (!auth.currentUser) {
             alert("Not logged in")
             return
@@ -134,16 +219,15 @@ function Home() {
                 },
                 body: JSON.stringify({
                     movieId,
-                    vote
+                    vote,
+                    round: votingRound
                 })
             }
         )
 
         const data =  await response.json()
 
-        console.log(data)
-
-        setVotedMovies((previouse) => [...previouse, movieId])
+        setVotedMovies((previous) => [...previous, movieId])
     }
     // fetch needs to wait for the Hono response
     async function onCreateRoom() {
@@ -170,8 +254,6 @@ function Home() {
                 roomCode: newRoomCode
             })
         })
-        console.log("Create room response:", response.status)
-
     }
 
     async function onJoinRoom() {
@@ -214,16 +296,138 @@ function Home() {
             movie.genre_ids.includes(selectedGenre)
         
         return matchesSearch && matchesGenre
-    })
-    const currentMovie = filteredMovies[currentMovieIndex]
+    })    
 
+    const totalMembers = members.length
+    const everyoneMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) => 
+                vote.movieId === movie.id &&
+                vote.vote === "like" &&
+                vote.round === 1
+        ).length
+        return totalMembers > 0 && likes === totalMembers
+    })
+    const strongMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) =>
+                vote.movieId === movie.id &&
+                vote.vote === "like" &&
+                vote.round === 1
+        ).length
+
+        return (
+            totalMembers > 0 &&
+            likes / totalMembers >= 0.75 &&
+            likes < totalMembers
+        )
+    })
+    const majorityMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) =>
+                vote.movieId === movie.id &&
+                vote.vote === "like" && 
+                vote.round === 1
+        ).length
+
+        return (
+            totalMembers > 0 &&
+            likes / totalMembers >= 0.5 &&
+            likes / totalMembers < 0.75
+        )
+    })
+
+    let roundOneMatches = everyoneMatches
+    let matchTier = "Everyone agrees"
+
+    if (roundOneMatches.length === 0) {
+        roundOneMatches = strongMatches
+        matchTier = "Strong matches"
+    }
+
+    if (roundOneMatches.length === 0) {
+        roundOneMatches = majorityMatches
+        matchTier = "Majority matches"
+    }
+
+
+    const currentEveryoneMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) => 
+                vote.movieId === movie.id &&
+            vote.vote === "like" &&
+            vote.round === votingRound
+        ).length
+
+        return totalMembers > 0 && likes === totalMembers
+    })
+
+    const currentStrongMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) => 
+                vote.movieId === movie.id &&
+            vote.vote === "like" &&
+            vote.round === votingRound
+        ).length
+
+        return (
+            totalMembers > 0 &&
+            likes / totalMembers >= 0.75 &&
+            likes < totalMembers
+        )
+    })
+
+    const currentMajorityMatches = movies.filter((movie) => {
+        const likes = liveVotes.filter(
+            (vote) => 
+                vote.movieId === movie.id &&
+            vote.vote === "like" &&
+            vote.round === votingRound
+        ).length
+
+        return (
+            totalMembers > 0 &&
+            likes / totalMembers >= 0.5 &&
+            likes / totalMembers < 0.75
+        )
+    })
+
+    const matchMovies =
+        votingRound === 1
+            ? roundOneMatches
+            : currentEveryoneMatches.length > 0
+                ? currentEveryoneMatches
+                : currentStrongMatches.length > 0
+                    ? currentStrongMatches
+                    : currentMajorityMatches
+
+
+    const moviesToVoteOn = 
+        votingRound === 1
+            ? filteredMovies
+            : movies.filter((movie) => roundMovieIds.includes(movie.id))
+
+    const currentMovie = moviesToVoteOn[currentMovieIndex]
+
+    const currentMovieVotes = liveVotes.filter(
+        (vote) => 
+            vote.movieId === currentMovie?.id &&
+            vote.round === votingRound
+    )
+
+    const likeCount = currentMovieVotes.filter(
+        (vote) => vote.vote === "like"
+    ).length
+
+    const passCount = currentMovieVotes.filter(
+        (vote) => vote.vote === "pass"
+    ).length
 
     return(
         <div>
             <h1>Movie Night Matcher</h1>
             <button onClick={onCreateRoom}>Create a Room</button>
             <button onClick={onJoinRoom}>Join a Room</button>
-            <button onClick={getMyVotes}>Get My Votes</button>
             <input 
                 value={joinRoomCode}
                 onChange={(event) => setJoinRoomCode(event.target.value)}
@@ -233,6 +437,21 @@ function Home() {
             {roomCode && 
                 <p>Your room code is: {roomCode}</p>
             }
+            <h2>Room: {roomCode}</h2>
+            <p>
+                You are: {auth.currentUser?.email}
+            </p>
+            <h3>Members</h3>
+            <ul>
+                {members.map((member) => {
+                    const isActive = Date.now() - member.lastSeen < 20000
+                    return (
+                        <li key={member.uid}>
+                            {isActive ? "🟢" : "⚪"} {member.email}
+                        </li>
+                    )
+                })}
+            </ul>
             {loading ? (
                 <p>Loading movies...</p>
             ) : error ? (
@@ -275,7 +494,48 @@ function Home() {
                         ))}
                     </div>
                     
-                    <p>Movie {currentMovieIndex + 1} of {filteredMovies.length}</p>
+                    <section>
+                        <h2>Matches</h2>
+                        {matchMovies.length > 0 ? (
+                            <>
+                                <h3>{matchTier}</h3>
+                                {matchMovies.map((movie) => {
+                                    const likes = liveVotes.filter(
+                                        (vote) =>
+                                            vote.movieId === movie.id &&
+                                            vote.vote === "like" &&
+                                            vote.round === votingRound
+                                    ).length
+                                    return (
+                                        <div key={movie.id}>
+                                            <p>{movie.title} - {likes}/{totalMembers}</p>
+                                        </div>
+                                    )
+                                })}
+                                {matchMovies.length > 1 && (
+                                        <button onClick={async () => {
+                                            setCurrentMovieIndex(0)
+                                            setVotedMovies([])
+                                            await fetch(`http://localhost:3000/api/rooms/${roomCode}/next-round`, {
+                                                method: "POST",
+                                                headers: {
+                                                    "Content-Type": "application/json"
+                                                },
+                                                body: JSON.stringify({
+                                                    movieIds: matchMovies.map((movie) => movie.id)
+                                                })
+                                            })
+                                        }}>
+                                            Vote Again
+                                        </button>
+                                    )}
+                            </>
+                        ) : (
+                            <p>No movies reached a majority.</p>
+                        )}
+                    </section>
+
+                    <p>Movie {currentMovieIndex + 1} of {moviesToVoteOn.length}</p>
 
                     {currentMovie ? (
                         <div key={currentMovie.id}
@@ -296,22 +556,17 @@ function Home() {
                                 }}
                             />
                             <p>{currentMovie.overview}</p>
+                            <p>✓{likeCount} ✗{passCount}</p>
                             <div>
                                 {votedMovies.includes(currentMovie.id) && (
                                     <p>You voted on this movie.</p>
                                 )}
 
-                                <button 
-                                    onClick={() => submitVote(currentMovie.id, "like")}
-                                    disabled={votedMovies.includes(currentMovie.id)}
-                                >
-                                    Like
+                                <button onClick={() => submitVote(currentMovie.id, "like")}                                >
+                                    {votedMovies.includes(currentMovie.id) ? "Change to Like" : "Like"}
                                 </button>
-                                <button 
-                                    onClick={() => submitVote(currentMovie.id, "pass")}
-                                    disabled={votedMovies.includes(currentMovie.id)}
-                                >
-                                    Pass
+                                <button onClick={() => submitVote(currentMovie.id, "pass")}                                >
+                                    {votedMovies.includes(currentMovie.id) ? "Change to Pass" : "Pass"}
                                 </button>
                                 <button 
                                     onClick={() => setCurrentMovieIndex((previous) => previous - 1)}
@@ -321,7 +576,7 @@ function Home() {
                                 </button>
                                 <button 
                                     onClick={() => setCurrentMovieIndex((previous) => previous + 1)}
-                                    disabled={currentMovieIndex === filteredMovies.length - 1}
+                                    disabled={currentMovieIndex === moviesToVoteOn.length - 1}
                                 >
                                     Next
                                 </button>
