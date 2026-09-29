@@ -50,7 +50,16 @@ function Home() {
         }[]
     >([])
     const [votingRound, setVotingRound] = useState(1)
-    const [roundMovieIds, setRoundMovieIds] = useState<number[]>([])    
+    const [roundMovieIds, setRoundMovieIds] = useState<number[]>([])   
+    const [chatMessage, setChatMessage] = useState("")
+    const [messages, setMessages] = useState<
+    {
+        uid: string
+        email: string
+        text: string
+        createdAt: number
+    } []
+    >([])
     
     useEffect(() => {
         if (!roomCode || !authReady) {
@@ -126,6 +135,29 @@ function Home() {
             }
         })
         return unsubscribe
+    }, [roomCode])
+    
+    useEffect(() => {
+        if (!roomCode) return
+        const messagesRef = collection(
+            firestore,
+            "rooms",
+            roomCode,
+            "messages"
+        )
+        const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
+            const newMessages = snapshot.docs
+                .map((doc) => doc.data() as {
+                    uid: string
+                    email: string
+                    text: string
+                    createdAt: number
+                })
+                .sort((a, b) => a.createdAt - b.createdAt)
+
+            setMessages(newMessages)
+        })
+        return () => unsubscribe()
     }, [roomCode])
 
     useEffect(() => {
@@ -277,7 +309,9 @@ function Home() {
         const data = await response.json()
 
         if(!response.ok) {
-            alert(data.error)
+            console.log("STATUS:", response.status)
+            console.log("DATA:", data)
+            alert(JSON.stringify(data))
             return
         }
 
@@ -285,6 +319,32 @@ function Home() {
         localStorage.setItem("roomCode", joinRoomCode)
 
         alert("Joined room!")
+    }
+
+    async function sendChatMessages() {
+        if (!chatMessage.trim() || !auth.currentUser || !roomCode) {
+            return
+        }
+        const token = await auth.currentUser.getIdToken()
+        const response = await fetch(
+            `http://localhost:3000/api/rooms/${roomCode}/messages`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization":   `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    text: chatMessage
+                })
+            }
+        )
+        const data = await response.json()
+        if (!response.ok) {
+            alert(data.error)
+            return
+        }
+        setChatMessage("")
     }
 
     const filteredMovies = movies.filter((movie) => {        
@@ -534,6 +594,24 @@ function Home() {
                             <p>No movies reached a majority.</p>
                         )}
                     </section>
+
+                    <div>
+                        <h2>Chat</h2>
+                        <div>
+                            {messages.map((message, index) => (
+                                <p key={index}>
+                                    <strong>{message.email}:</strong> {message.text}
+                                </p>
+                            ))}
+                        </div>
+                        <input 
+                            type="text" 
+                            value={chatMessage}
+                            onChange={(event) => setChatMessage(event.target.value)}
+                            placeholder="Type a message..."
+                        />
+                        <button onClick={sendChatMessages}>Send</button>
+                    </div>
 
                     <p>Movie {currentMovieIndex + 1} of {moviesToVoteOn.length}</p>
 

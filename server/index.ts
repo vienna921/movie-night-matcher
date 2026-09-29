@@ -5,6 +5,7 @@ import { cors } from "hono/cors"
 import { db } from "./firebaseAdmin"
 import { FieldValue } from "firebase-admin/firestore"
 import { getAuth } from "firebase-admin/auth"
+import { decode } from "hono/jwt"
 
 const app = new Hono()
 // middleware
@@ -56,7 +57,8 @@ app.post("/api/rooms", async (c) => {
                 lastSeen: Date.now()
             }
         ],
-        roundMovieIds: []
+        roundMovieIds: [],
+        expiresAt: Date.now() - 1000
     })
 
     return c.json({
@@ -97,6 +99,12 @@ app.post("/api/rooms/join", async (c) => {
         }, 404)
     }
 
+    const roomData = snapshot.data()
+    if (roomData?.expiresAt && Date.now() > roomData.expiresAt) {
+        return c.json({
+            error: "Room has expired"
+        }, 410)
+    }
     const authHeader = c.req.header("Authorization")
     if (!authHeader) {
         return c.json({ error: "Missing authorization header" }, 401)
@@ -116,7 +124,6 @@ app.post("/api/rooms/join", async (c) => {
     }
 
     // wait for Firestore to finish update
-    const roomData = snapshot.data()
     const members = roomData?.members || []
     const alreadyMember = members.some(
         (member: { uid: string }) => member.uid === uid
@@ -286,6 +293,43 @@ app.post("/api/rooms/:roomCode/heartbeat", async (c) => {
         members: updatedMembers
     })
     return c.json({ message: "Heartbeat updated" })
+})
+app.post("/api/rooms/:roomCode/messages", async (c) => {
+    const roomCode = c.req.param("roomCode")
+    const data = await c.req.json()
+
+    const authHeader = c.req.header("Authorization")
+
+    if (!authHeader) {
+        return c.json({ error: "Missing authorization header" }, 401)
+    }
+    const token = authHeader.split(" ")[1]
+    if (!token) {
+        return c.json({ error: "Missing token" }, 401)
+    }
+    let decodedToken
+    try {
+        decodedToken = await getAuth().verifyIdToken(token)
+    } catch (error) {
+        return c.json({ error: "Invalid token" }, 401)
+    }
+
+    const messageRef =db
+        .collection("rooms")
+        .doc(roomCode)
+        .collection("messages")
+        .doc()
+
+    await messageRef.set({
+        uid: decodedToken.uid,
+        email: decodedToken.email,
+        text: data.text,
+        createdAt: Date.now()
+    })
+
+    return c.json({
+        message: "Message sent"
+    })
 })
 // start server
 serve({
