@@ -60,7 +60,8 @@ function Home() {
         createdAt: number
     } []
     >([])
-    
+    const [isMovieHovered, setIsMovieHovered] = useState(false)
+   
     useEffect(() => {
         if (!roomCode || !authReady) {
             return
@@ -167,6 +168,9 @@ function Home() {
         return unsubscribe
     }, [])
 
+    async function copyRoomCode() {
+        await navigator.clipboard.writeText(roomCode)
+    }
     async function getMovies() {
         try {
             const response = await fetch("http://localhost:3000/api/movies")
@@ -484,38 +488,107 @@ function Home() {
     ).length
 
     return(
-        <div>
-            <h1>Movie Night Matcher</h1>
-            <button onClick={onCreateRoom}>Create a Room</button>
-            <button onClick={onJoinRoom}>Join a Room</button>
-            <input 
-                value={joinRoomCode}
-                onChange={(event) => setJoinRoomCode(event.target.value)}
-                placeholder="Enter room code"
-            />
+        <div
+            style={{
+                maxWidth: "1200px",
+                margin: "0 auto",
+                padding: "15px"
+            }}
+        >
+            <h1
+                style={{
+                    textAlign: "center",
+                    fontSize: "42px",
+                    marginBottom: "10px"
+                }}
+            >
+                Movie Night Matcher
+            </h1>
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    marginBottom: "20px"
+                }}
+            >
+                <button onClick={onCreateRoom}>Create a Room</button>
+                <input 
+                    value={joinRoomCode}
+                    onChange={(event) => setJoinRoomCode(event.target.value)}
+                    placeholder="Enter room code"
+                    style={{
+                        width: "180px",
+                        padding: "8px"
+                    }}
+                />
+                <button onClick={onJoinRoom}>Join a Room</button>
+            </div>
 
-            {roomCode && 
-                <p>Your room code is: {roomCode}</p>
-            }
-            <h2>Room: {roomCode}</h2>
-            <p>
-                You are: {auth.currentUser?.email}
-            </p>
-            <h3>Members</h3>
-            <ul>
-                {members.map((member) => {
-                    const isActive = Date.now() - member.lastSeen < 20000
-                    return (
-                        <li key={member.uid}>
-                            {isActive ? "🟢" : "⚪"} {member.email}
-                        </li>
-                    )
-                })}
-            </ul>
+            {roomCode && (
+                <div
+                    style={{
+                        padding: "15px",
+                        marginBottom: "20px",
+                        border: "1px solid #ddd",
+                        borderRadius: "10px",
+                        textAlign: "center",
+                        backgroundColor: "#f8f9fa"
+                    }}
+                >
+                    <h2
+                        style={{
+                            marginBottom: "5px"
+                        }}
+                    >
+                        Room: <span style={{ letterSpacing: "3px" }}>{roomCode}</span>
+                    </h2>
+                    <button onClick={copyRoomCode}>
+                        Copy Room Code
+                    </button>
+                    <p>
+                        You are: {auth.currentUser?.email}
+                    </p>
+                </div>
+            )}
+
+            <div 
+                style={{
+                    padding: "15px",
+                    marginBottom: "20px",
+                    border: "1px solid #ddd",
+                    borderRadius: "10px"
+                }}
+            >
+                <h3>Members</h3>
+                <ul>
+                    {members.map((member) => {
+                        const isActive = Date.now() - member.lastSeen < 20000
+                        return (
+                            <li key={member.uid}>
+                                {isActive ? "🟢" : "⚪"} {member.email}
+                            </li>
+                        )
+                    })}
+                </ul>
+            </div>
+        
             {loading ? (
                 <p>Loading movies...</p>
             ) : error ? (
-                <p>{error}</p>
+                <p
+                    style={{
+                        textAlign: "center",
+                        padding: "10px",
+                        margin: "10px 0",
+                        border: "1px solid #f5c2c7",
+                        borderRadius: "8px"
+                    }}
+                >
+                    {error}
+                </p>
             ) : (
                 <div
                     style={{
@@ -616,24 +689,68 @@ function Home() {
                     <p>Movie {currentMovieIndex + 1} of {moviesToVoteOn.length}</p>
 
                     {currentMovie ? (
-                        <div key={currentMovie.id}
+                        <div 
+                            key={currentMovie.id}
+                            onMouseEnter={() => setIsMovieHovered(true)}
+                            onMouseLeave={() => setIsMovieHovered(false)}
                             style={{
-                                width: "250px",
-                                margin: "20px",
-                                padding: "15px",
-                                border: "1px solid #ccc"
+                                width: "300px",
+                                maxWidth: "300px",
+                                margin: "20px auto",
+                                padding: "20px",
+                                border: "1px solid #ddd",
+                                borderRadius: "12px",
+                                boxShadow: isMovieHovered
+                                    ? "0 8px 20px rgba(0, 0, 0, 0.18)"
+                                    : "0 4px 12px rgba(0, 0, 0, 0.1)",
+                                backgroundColor: "white",
+                                transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                                transform: isMovieHovered ? "translateY(-5px)" : "translateY(0)",
                             }}
                         >
-                            <h2>{currentMovie.title}</h2>
-                            <p>Rating: {currentMovie.vote_average.toFixed(1)}/10</p>
+                            <h2
+                                style={{
+                                    textAlign: "center",
+                                    marginTop: "10px",
+                                    marginBottom: "10px"
+                                }}
+                            >
+                                {currentMovie.title}
+                            </h2>
+                            <p
+                                style={{
+                                    textAlign: "center",
+                                    margin: "5px 0",
+                                    fontSize: "14px"
+                                }}
+                            >Rating: {currentMovie.vote_average.toFixed(1)}/10</p>
                             <img
                                 src={`https://image.tmdb.org/t/p/w500${currentMovie.poster_path}`}
                                 alt={currentMovie.title}
                                 style={{
-                                    width: "100%"
+                                    width: "100%",
+                                    height: "auto",
+                                    marginBottom: "15px"
                                 }}
                             />
-                            <p>{currentMovie.overview}</p>
+                            <div
+                                style={{
+                                    marginTop: "15px",
+                                    marginBottom: "15px",
+                                }}
+                            >
+                                 <p
+                                    style={{
+                                        lineHeight: "1.3",
+                                        margin: 0,
+                                        width: "100%",
+                                        textAlign: "center"
+                                    }}
+                                >
+                                    {currentMovie.overview}
+                                </p>
+                            </div>
+
                             <p>✓{likeCount} ✗{passCount}</p>
                             <div>
                                 {votedMovies.includes(currentMovie.id) && (
