@@ -72,7 +72,7 @@ function Home() {
             }
             const token = await auth.currentUser.getIdToken()
             await fetch(
-                `http://localhost:3000/api/rooms/${roomCode}/heartbeat`,
+                `${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/heartbeat`,
                 {
                     method: "POST",
                     headers: {
@@ -173,7 +173,7 @@ function Home() {
     }
     async function getMovies() {
         try {
-            const response = await fetch("http://localhost:3000/api/movies")
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/api/movies`)
             // check to see if server returned an error
             if (!response.ok) {
                 throw new Error("Failed to fetch movies")
@@ -215,7 +215,7 @@ function Home() {
         const token = await auth.currentUser.getIdToken()
 
         const response = await fetch(
-            `http://localhost:3000/api/rooms/${roomCode}/votes`,
+            `${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/votes`,
             {
                 method: "GET",
                 headers: {
@@ -246,7 +246,7 @@ function Home() {
         const token = await auth.currentUser.getIdToken()
 
         const response = await fetch(
-            `http://localhost:3000/api/rooms/${roomCode}/votes`,
+            `${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/votes`,
             {
                 method: "POST",
                 headers: {
@@ -278,7 +278,7 @@ function Home() {
         const user = auth.currentUser
         const token = await user.getIdToken()
         // where and how to send request
-        const response = await fetch("http://localhost:3000/api/rooms", {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/rooms`, {
             method: "POST",
             // tell Hono what format we're sending (JSON)
             headers: {
@@ -300,7 +300,7 @@ function Home() {
         const user = auth.currentUser
         const token = await user.getIdToken()
         
-        const response = await fetch("http://localhost:3000/api/rooms/join", {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/rooms/join`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -331,7 +331,7 @@ function Home() {
         }
         const token = await auth.currentUser.getIdToken()
         const response = await fetch(
-            `http://localhost:3000/api/rooms/${roomCode}/messages`,
+            `${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/messages`,
             {
                 method: "POST",
                 headers: {
@@ -649,7 +649,7 @@ function Home() {
                                         <button onClick={async () => {
                                             setCurrentMovieIndex(0)
                                             setVotedMovies([])
-                                            await fetch(`http://localhost:3000/api/rooms/${roomCode}/next-round`, {
+                                            await fetch(`${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/next-round`, {
                                                 method: "POST",
                                                 headers: {
                                                     "Content-Type": "application/json"
