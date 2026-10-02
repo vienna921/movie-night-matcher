@@ -2,24 +2,18 @@ import { useState, useEffect } from "react"
 import { auth, firestore } from "../firebase"
 import { onAuthStateChanged } from "firebase/auth"
 import { collection, doc, onSnapshot } from "firebase/firestore"
+import Chat from "./Chat"
+import RoomHeader from "./RoomHeader"
+import MovieCard from "./MovieCard"
+import MatchResults from "./MatchResults"
+import {
+    genres,
+    filterMovies,
+    getMatchMovies,
+    getMovieVotes
+} from "../utils/movieUtils"
+import type { Movie } from "../utils/movieUtils"
 
-type Movie = {
-    id: number
-    title: string
-    poster_path: string | null
-    vote_average: number
-    overview: string
-    genre_ids: number[]
-}
-
-const genres = [
-    { id: 28, name: "Action" },
-    { id: 35, name: "Comedy" },
-    { id: 18, name: "Drama" },
-    { id: 27, name: "Horror" },
-    { id: 878, name: "Science Fiction" },
-    { id: 10749, name: "Romance" },
-]
 function Home() {
     const [roomCode, setRoomCode] = useState("")
     useEffect(() => {
@@ -28,7 +22,7 @@ function Home() {
             setRoomCode(savedRoomCode)
         }
     }, [])
-  
+
     const [joinRoomCode, setJoinRoomCode] = useState("")
     const [movies, setMovies] = useState<Movie[]>([])
     const [loading, setLoading] = useState(true)
@@ -39,29 +33,30 @@ function Home() {
     const [searchTerm, setSearchTerm] = useState("")
     const [selectedGenre, setSelectedGenre] = useState<number | null>(null)
     const [members, setMembers] = useState<{
-        uid: string; email: string; lastSeen: number }[]
+        uid: string; email: string; lastSeen: number
+    }[]
     >([])
     const [liveVotes, setLiveVotes] = useState<
-        { 
+        {
             userId: string
             movieId: number
-            vote: "like" | "pass" 
+            vote: "like" | "pass"
             round: number
         }[]
     >([])
     const [votingRound, setVotingRound] = useState(1)
-    const [roundMovieIds, setRoundMovieIds] = useState<number[]>([])   
+    const [roundMovieIds, setRoundMovieIds] = useState<number[]>([])
     const [chatMessage, setChatMessage] = useState("")
     const [messages, setMessages] = useState<
-    {
-        uid: string
-        email: string
-        text: string
-        createdAt: number
-    } []
+        {
+            uid: string
+            email: string
+            text: string
+            createdAt: number
+        }[]
     >([])
     const [isMovieHovered, setIsMovieHovered] = useState(false)
-   
+
     useEffect(() => {
         if (!roomCode || !authReady) {
             return
@@ -117,7 +112,7 @@ function Home() {
         }
 
         const roomRef = doc(firestore, "rooms", roomCode)
-        
+
         // whenever this Firestore document changes,
         const unsubscribe = onSnapshot(roomRef, (snapshot) => {
             if (snapshot.exists()) {
@@ -137,7 +132,7 @@ function Home() {
         })
         return unsubscribe
     }, [roomCode])
-    
+
     useEffect(() => {
         if (!roomCode) return
         const messagesRef = collection(
@@ -237,7 +232,7 @@ function Home() {
         }
     }, [roomCode, authReady])
 
-    async function submitVote(movieId: number, vote:"like" | "pass") {
+    async function submitVote(movieId: number, vote: "like" | "pass") {
         if (!auth.currentUser) {
             alert("Not logged in")
             return
@@ -261,7 +256,7 @@ function Home() {
             }
         )
 
-        const data =  await response.json()
+        const data = await response.json()
 
         setVotedMovies((previous) => [...previous, movieId])
     }
@@ -299,7 +294,7 @@ function Home() {
         }
         const user = auth.currentUser
         const token = await user.getIdToken()
-        
+
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/rooms/join`, {
             method: "POST",
             headers: {
@@ -312,7 +307,7 @@ function Home() {
         })
         const data = await response.json()
 
-        if(!response.ok) {
+        if (!response.ok) {
             console.log("STATUS:", response.status)
             console.log("DATA:", data)
             alert(JSON.stringify(data))
@@ -336,7 +331,7 @@ function Home() {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    "Authorization":   `Bearer ${token}`
+                    "Authorization": `Bearer ${token}`
                 },
                 body: JSON.stringify({
                     text: chatMessage
@@ -351,143 +346,32 @@ function Home() {
         setChatMessage("")
     }
 
-    const filteredMovies = movies.filter((movie) => {        
-        const matchesSearch = movie.title
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase())
-        const matchesGenre = 
-            selectedGenre === null || 
-            movie.genre_ids.includes(selectedGenre)
-        
-        return matchesSearch && matchesGenre
-    })    
-
+    const filteredMovies = filterMovies(
+        movies,
+        searchTerm,
+        selectedGenre
+    )
     const totalMembers = members.length
-    const everyoneMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) => 
-                vote.movieId === movie.id &&
-                vote.vote === "like" &&
-                vote.round === 1
-        ).length
-        return totalMembers > 0 && likes === totalMembers
-    })
-    const strongMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) =>
-                vote.movieId === movie.id &&
-                vote.vote === "like" &&
-                vote.round === 1
-        ).length
+    const { matchMovies, matchTier } = getMatchMovies(
+        movies,
+        liveVotes,
+        totalMembers,
+        votingRound
+    )
 
-        return (
-            totalMembers > 0 &&
-            likes / totalMembers >= 0.75 &&
-            likes < totalMembers
-        )
-    })
-    const majorityMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) =>
-                vote.movieId === movie.id &&
-                vote.vote === "like" && 
-                vote.round === 1
-        ).length
-
-        return (
-            totalMembers > 0 &&
-            likes / totalMembers >= 0.5 &&
-            likes / totalMembers < 0.75
-        )
-    })
-
-    let roundOneMatches = everyoneMatches
-    let matchTier = "Everyone agrees"
-
-    if (roundOneMatches.length === 0) {
-        roundOneMatches = strongMatches
-        matchTier = "Strong matches"
-    }
-
-    if (roundOneMatches.length === 0) {
-        roundOneMatches = majorityMatches
-        matchTier = "Majority matches"
-    }
-
-
-    const currentEveryoneMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) => 
-                vote.movieId === movie.id &&
-            vote.vote === "like" &&
-            vote.round === votingRound
-        ).length
-
-        return totalMembers > 0 && likes === totalMembers
-    })
-
-    const currentStrongMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) => 
-                vote.movieId === movie.id &&
-            vote.vote === "like" &&
-            vote.round === votingRound
-        ).length
-
-        return (
-            totalMembers > 0 &&
-            likes / totalMembers >= 0.75 &&
-            likes < totalMembers
-        )
-    })
-
-    const currentMajorityMatches = movies.filter((movie) => {
-        const likes = liveVotes.filter(
-            (vote) => 
-                vote.movieId === movie.id &&
-            vote.vote === "like" &&
-            vote.round === votingRound
-        ).length
-
-        return (
-            totalMembers > 0 &&
-            likes / totalMembers >= 0.5 &&
-            likes / totalMembers < 0.75
-        )
-    })
-
-    const matchMovies =
-        votingRound === 1
-            ? roundOneMatches
-            : currentEveryoneMatches.length > 0
-                ? currentEveryoneMatches
-                : currentStrongMatches.length > 0
-                    ? currentStrongMatches
-                    : currentMajorityMatches
-
-
-    const moviesToVoteOn = 
+    const moviesToVoteOn =
         votingRound === 1
             ? filteredMovies
             : movies.filter((movie) => roundMovieIds.includes(movie.id))
-
     const currentMovie = moviesToVoteOn[currentMovieIndex]
 
-    const currentMovieVotes = liveVotes.filter(
-        (vote) => 
-            vote.movieId === currentMovie?.id &&
-            vote.round === votingRound
+    const { likeCount, passCount } = getMovieVotes(
+        liveVotes,
+        currentMovie?.id,
+        votingRound
     )
 
-    const likeCount = currentMovieVotes.filter(
-        (vote) => vote.vote === "like"
-    ).length
-
-    const passCount = currentMovieVotes.filter(
-        (vote) => vote.vote === "pass"
-    ).length
-
-    return(
+    return (
         <div
             style={{
                 maxWidth: "1200px",
@@ -515,7 +399,7 @@ function Home() {
                 }}
             >
                 <button onClick={onCreateRoom}>Create a Room</button>
-                <input 
+                <input
                     value={joinRoomCode}
                     onChange={(event) => setJoinRoomCode(event.target.value)}
                     placeholder="Enter room code"
@@ -526,35 +410,15 @@ function Home() {
                 />
                 <button onClick={onJoinRoom}>Join a Room</button>
             </div>
-
             {roomCode && (
-                <div
-                    style={{
-                        padding: "15px",
-                        marginBottom: "20px",
-                        border: "1px solid #ddd",
-                        borderRadius: "10px",
-                        textAlign: "center",
-                        backgroundColor: "#f8f9fa"
-                    }}
-                >
-                    <h2
-                        style={{
-                            marginBottom: "5px"
-                        }}
-                    >
-                        Room: <span style={{ letterSpacing: "3px" }}>{roomCode}</span>
-                    </h2>
-                    <button onClick={copyRoomCode}>
-                        Copy Room Code
-                    </button>
-                    <p>
-                        You are: {auth.currentUser?.email}
-                    </p>
-                </div>
+                <RoomHeader
+                    roomCode={roomCode}
+                    email={auth.currentUser?.email}
+                    copyRoomCode={copyRoomCode}
+                />
             )}
 
-            <div 
+            <div
                 style={{
                     padding: "15px",
                     marginBottom: "20px",
@@ -574,7 +438,7 @@ function Home() {
                     })}
                 </ul>
             </div>
-        
+
             {loading ? (
                 <p>Loading movies...</p>
             ) : error ? (
@@ -598,7 +462,7 @@ function Home() {
                         flexWrap: "wrap"
                     }}
                 >
-                    <input 
+                    <input
                         value={searchTerm}
                         onChange={(event) => {
                             setSearchTerm(event.target.value)
@@ -626,163 +490,47 @@ function Home() {
                             </button>
                         ))}
                     </div>
-                    
-                    <section>
-                        <h2>Matches</h2>
-                        {matchMovies.length > 0 ? (
-                            <>
-                                <h3>{matchTier}</h3>
-                                {matchMovies.map((movie) => {
-                                    const likes = liveVotes.filter(
-                                        (vote) =>
-                                            vote.movieId === movie.id &&
-                                            vote.vote === "like" &&
-                                            vote.round === votingRound
-                                    ).length
-                                    return (
-                                        <div key={movie.id}>
-                                            <p>{movie.title} - {likes}/{totalMembers}</p>
-                                        </div>
-                                    )
-                                })}
-                                {matchMovies.length > 1 && (
-                                        <button onClick={async () => {
-                                            setCurrentMovieIndex(0)
-                                            setVotedMovies([])
-                                            await fetch(`${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/next-round`, {
-                                                method: "POST",
-                                                headers: {
-                                                    "Content-Type": "application/json"
-                                                },
-                                                body: JSON.stringify({
-                                                    movieIds: matchMovies.map((movie) => movie.id)
-                                                })
-                                            })
-                                        }}>
-                                            Vote Again
-                                        </button>
-                                    )}
-                            </>
-                        ) : (
-                            <p>No movies reached a majority.</p>
-                        )}
-                    </section>
 
-                    <div>
-                        <h2>Chat</h2>
-                        <div>
-                            {messages.map((message, index) => (
-                                <p key={index}>
-                                    <strong>{message.email}:</strong> {message.text}
-                                </p>
-                            ))}
-                        </div>
-                        <input 
-                            type="text" 
-                            value={chatMessage}
-                            onChange={(event) => setChatMessage(event.target.value)}
-                            placeholder="Type a message..."
-                        />
-                        <button onClick={sendChatMessages}>Send</button>
-                    </div>
+                    <MatchResults
+                        matchMovies={matchMovies}
+                        matchTier={matchTier}
+                        liveVotes={liveVotes}
+                        totalMembers={totalMembers}
+                        votingRound={votingRound}
+                        setCurrentMovieIndex={setCurrentMovieIndex}
+                        setVotedMovies={setVotedMovies}
+                        roomCode={roomCode}
+                    />
+
+                    <Chat
+                        messages={messages}
+                        chatMessage={chatMessage}
+                        setChatMessage={setChatMessage}
+                        sendChatMessages={sendChatMessages}
+                    />
 
                     <p>Movie {currentMovieIndex + 1} of {moviesToVoteOn.length}</p>
 
                     {currentMovie ? (
-                        <div 
-                            key={currentMovie.id}
-                            onMouseEnter={() => setIsMovieHovered(true)}
-                            onMouseLeave={() => setIsMovieHovered(false)}
-                            style={{
-                                width: "300px",
-                                maxWidth: "300px",
-                                margin: "20px auto",
-                                padding: "20px",
-                                border: "1px solid #ddd",
-                                borderRadius: "12px",
-                                boxShadow: isMovieHovered
-                                    ? "0 8px 20px rgba(0, 0, 0, 0.18)"
-                                    : "0 4px 12px rgba(0, 0, 0, 0.1)",
-                                backgroundColor: "white",
-                                transition: "transform 0.2s ease, box-shadow 0.2s ease",
-                                transform: isMovieHovered ? "translateY(-5px)" : "translateY(0)",
-                            }}
-                        >
-                            <h2
-                                style={{
-                                    textAlign: "center",
-                                    marginTop: "10px",
-                                    marginBottom: "10px"
-                                }}
-                            >
-                                {currentMovie.title}
-                            </h2>
-                            <p
-                                style={{
-                                    textAlign: "center",
-                                    margin: "5px 0",
-                                    fontSize: "14px"
-                                }}
-                            >Rating: {currentMovie.vote_average.toFixed(1)}/10</p>
-                            <img
-                                src={`https://image.tmdb.org/t/p/w500${currentMovie.poster_path}`}
-                                alt={currentMovie.title}
-                                style={{
-                                    width: "100%",
-                                    height: "auto",
-                                    marginBottom: "15px"
-                                }}
-                            />
-                            <div
-                                style={{
-                                    marginTop: "15px",
-                                    marginBottom: "15px",
-                                }}
-                            >
-                                 <p
-                                    style={{
-                                        lineHeight: "1.3",
-                                        margin: 0,
-                                        width: "100%",
-                                        textAlign: "center"
-                                    }}
-                                >
-                                    {currentMovie.overview}
-                                </p>
-                            </div>
 
-                            <p>✓{likeCount} ✗{passCount}</p>
-                            <div>
-                                {votedMovies.includes(currentMovie.id) && (
-                                    <p>You voted on this movie.</p>
-                                )}
-
-                                <button onClick={() => submitVote(currentMovie.id, "like")}                                >
-                                    {votedMovies.includes(currentMovie.id) ? "Change to Like" : "Like"}
-                                </button>
-                                <button onClick={() => submitVote(currentMovie.id, "pass")}                                >
-                                    {votedMovies.includes(currentMovie.id) ? "Change to Pass" : "Pass"}
-                                </button>
-                                <button 
-                                    onClick={() => setCurrentMovieIndex((previous) => previous - 1)}
-                                    disabled={currentMovieIndex === 0}
-                                >
-                                    Previous
-                                </button>
-                                <button 
-                                    onClick={() => setCurrentMovieIndex((previous) => previous + 1)}
-                                    disabled={currentMovieIndex === moviesToVoteOn.length - 1}
-                                >
-                                    Next
-                                </button>
-                            </div>
-                        </div>
+                        <MovieCard
+                            movie={currentMovie}
+                            isHovered={isMovieHovered}
+                            setIsHovered={setIsMovieHovered}
+                            likeCount={likeCount}
+                            passCount={passCount}
+                            hasVoted={votedMovies.includes(currentMovie.id)}
+                            submitVote={submitVote}
+                            currentMovieIndex={currentMovieIndex}
+                            moviesToVoteOnLength={moviesToVoteOn.length}
+                            setCurrentMovieIndex={setCurrentMovieIndex}
+                        />
                     ) : (
                         <p>No movies found.</p>
                     )}
                 </div>
             )}
-            
+
         </div>
     )
 }
