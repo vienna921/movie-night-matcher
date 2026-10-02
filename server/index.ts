@@ -10,7 +10,10 @@ import { decode } from "hono/jwt"
 const app = new Hono()
 // middleware
 app.use("*", cors({
-    origin: "http://localhost:5173"
+    origin: [
+                "http://localhost:5173",
+                "https://movie-night-matcher-frontend-p88r.onrender.com"
+            ]   
 }))
 // hono gives context object and sends back whoever requested
 app.get("/", (c) => {
