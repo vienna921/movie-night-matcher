@@ -40,7 +40,7 @@ function MatchResults({
         setVotedMovies([])
         
         await fetch(
-            `${import.meta.env.VITE_API_URL}/api/rooms//${roomCode}/next-round`,
+            `${import.meta.env.VITE_API_URL}/api/rooms/${roomCode}/next-round`,
             {
                 method: "POST",
                 headers: {
