@@ -61,7 +61,7 @@ app.post("/api/rooms", async (c) => {
             }
         ],
         roundMovieIds: [],
-        expiresAt: Date.now() - 1000
+        expiresAt: Date.now() + 1000 * 60 * 60 * 24
     })
 
     return c.json({
